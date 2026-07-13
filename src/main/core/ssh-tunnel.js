@@ -48,6 +48,7 @@ export function openTunnel(config) {
       port: sshPort,
       username: sshUsername,
       readyTimeout: 15000,
+      compress: true, // Enable SSH compression (gzip-like) for faster data transfer
       ...authConfig
     }
 
