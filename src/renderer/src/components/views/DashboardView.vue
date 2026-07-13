@@ -11,6 +11,7 @@ const searchQuery = ref('')
 const searchInput = ref(null)
 const activeTemplateId = ref('custom')
 const globalRowLimit = ref('')
+const globalRowOrder = ref('newest')
 
 const applyBulkMode = (mode) => {
   if (!mode) return
@@ -120,7 +121,8 @@ const startSync = () => {
       name: tableName,
       mode: store.tableModes[tableName] || 'full',
       rowCount: tableObj ? tableObj.rowCount : 0,
-      limit: globalRowLimit.value && globalRowLimit.value > 0 ? Number(globalRowLimit.value) : null
+      limit: globalRowLimit.value && globalRowLimit.value > 0 ? Number(globalRowLimit.value) : null,
+      order: globalRowOrder.value
     }
   })
   
@@ -251,6 +253,10 @@ watch(() => store.activeProfileId, (newId) => {
               <div class="flex items-center gap-2 border-l border-gray-300 pl-4">
                 <label class="text-xs font-medium text-gray-700 whitespace-nowrap">Row Limit:</label>
                 <input v-model="globalRowLimit" type="number" placeholder="Unlimited" class="form-input py-1 px-2 text-xs w-24" min="0" />
+                <select v-if="globalRowLimit && Number(globalRowLimit) > 0" v-model="globalRowOrder" class="form-input py-1 px-2 text-xs w-24 bg-white border border-gray-300 rounded shadow-sm">
+                  <option value="newest">Newest</option>
+                  <option value="oldest">Oldest</option>
+                </select>
               </div>
             </div>
 

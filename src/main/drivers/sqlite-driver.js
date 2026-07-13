@@ -63,8 +63,45 @@ export class SQLiteDriver {
     this.db.prepare(`DELETE FROM "${tableName}"`).run()
   }
 
-  async *streamTable(tableName, limit) {
+  detectSortColumn(tableName) {
+    try {
+      const info = this.db.pragma(`table_info("${tableName}")`)
+      const columns = info.map(c => c.name)
+      const colNames = columns.map(c => c.toLowerCase())
+      
+      const timeCandidates = ['created_at', 'updated_at', 'created_time', 'updated_time', 'tanggal', 'date']
+      for (const cand of timeCandidates) {
+        const found = colNames.find(c => c === cand)
+        if (found) {
+          return columns[colNames.indexOf(cand)]
+        }
+      }
+      
+      const pkCol = info.find(c => c.pk > 0)
+      if (pkCol) {
+        return pkCol.name
+      }
+      
+      const idCol = columns.find(c => c.toLowerCase().endsWith('id'))
+      if (idCol) {
+        return idCol
+      }
+    } catch (e) {
+      // Fallback silently
+    }
+    return null
+  }
+
+  async *streamTable(tableName, limit, order = 'oldest') {
     let sql = `SELECT * FROM "${tableName}"`
+    
+    if (limit && limit > 0 && order === 'newest') {
+      const sortColumn = this.detectSortColumn(tableName)
+      if (sortColumn) {
+        sql += ` ORDER BY "${sortColumn}" DESC`
+      }
+    }
+
     if (limit && limit > 0) {
       sql += ` LIMIT ${limit}`
     }

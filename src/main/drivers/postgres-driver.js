@@ -70,15 +70,67 @@ export class PostgreSQLDriver {
     await this.client.query(`TRUNCATE TABLE "${tableName}" CASCADE`)
   }
 
-  async *streamTable(tableName, limit) {
+  async detectSortColumn(tableName) {
+    try {
+      const res = await this.client.query(`
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name = $1
+      `, [tableName])
+      
+      const columns = res.rows.map(r => r.column_name)
+      const colNames = columns.map(c => c.toLowerCase())
+      
+      const timeCandidates = ['created_at', 'updated_at', 'created_time', 'updated_time', 'tanggal', 'date']
+      for (const cand of timeCandidates) {
+        const found = colNames.find(c => c === cand)
+        if (found) {
+          return columns[colNames.indexOf(cand)]
+        }
+      }
+      
+      const pkRes = await this.client.query(`
+        SELECT a.attname
+        FROM   pg_index i
+        JOIN   pg_attribute a ON a.attrelid = i.indrelid
+                             AND a.attnum = ANY(i.indkey)
+        WHERE  i.indrelid = $1::regclass
+        AND    i.indisprimary;
+      `, [tableName]).catch(() => ({ rows: [] }))
+      
+      if (pkRes.rows && pkRes.rows.length > 0) {
+        return pkRes.rows[0].attname
+      }
+      
+      const idCol = columns.find(c => c.toLowerCase().endsWith('id'))
+      if (idCol) {
+        return idCol
+      }
+    } catch (e) {
+      // Fallback silently
+    }
+    return null
+  }
+
+  async *streamTable(tableName, limit, order = 'oldest') {
     let offset = 0
     const chunkLimit = 1000
     let totalFetched = 0
+    
+    let orderSql = ''
+    if (limit && limit > 0 && order === 'newest') {
+      const sortColumn = await this.detectSortColumn(tableName)
+      if (sortColumn) {
+        orderSql = `ORDER BY "${sortColumn}" DESC`
+      }
+    }
+
     while (true) {
       const fetchLimit = (limit > 0 && limit - totalFetched < chunkLimit) ? limit - totalFetched : chunkLimit
       if (limit > 0 && totalFetched >= limit) break
 
-      const res = await this.client.query(`SELECT * FROM "${tableName}" LIMIT ${fetchLimit} OFFSET ${offset}`)
+      const sql = `SELECT * FROM "${tableName}" ${orderSql} LIMIT ${fetchLimit} OFFSET ${offset}`
+      const res = await this.client.query(sql)
       for (const row of res.rows) {
         yield row
         totalFetched++

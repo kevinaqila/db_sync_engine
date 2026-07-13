@@ -36,6 +36,7 @@ onMounted(async () => {
           <DashboardView v-else-if="store.currentView === 'dashboard'" />
           <ProfileForm 
             v-else-if="store.currentView === 'newProfile' || store.currentView === 'editProfile'" 
+            :key="store.currentView === 'editProfile' ? store.editingProfile?.id : 'new'"
             :profile="store.currentView === 'editProfile' ? store.editingProfile : null" 
           />
           <HistoryView v-else-if="store.currentView === 'history'" />

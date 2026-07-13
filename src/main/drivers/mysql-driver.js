@@ -68,10 +68,47 @@ export class MySQLDriver {
     await this.conn.query(`TRUNCATE TABLE \`${tableName}\``)
   }
 
-  streamTable(tableName, limit) {
+  async detectSortColumn(tableName) {
+    try {
+      const [columns] = await this.conn.query(`SHOW COLUMNS FROM \`${tableName}\``)
+      const colNames = columns.map(c => c.Field.toLowerCase())
+      
+      const timeCandidates = ['created_at', 'updated_at', 'created_time', 'updated_time', 'tanggal', 'date']
+      for (const cand of timeCandidates) {
+        const found = colNames.find(c => c === cand)
+        if (found) {
+          const originalCol = columns.find(c => c.Field.toLowerCase() === cand)
+          return originalCol.Field
+        }
+      }
+      
+      const primaryCol = columns.find(c => c.Key === 'PRI')
+      if (primaryCol) {
+        return primaryCol.Field
+      }
+      
+      const idCol = columns.find(c => c.Field.toLowerCase().endsWith('id'))
+      if (idCol) {
+        return idCol.Field
+      }
+    } catch (e) {
+      // Fallback silently if SHOW COLUMNS fails
+    }
+    return null
+  }
+
+  async streamTable(tableName, limit, order = 'oldest') {
     // Must use the callback API from underlying connection for streaming
     const rawConn = this.conn.connection
     let sql = `SELECT * FROM \`${tableName}\``
+    
+    if (limit && limit > 0 && order === 'newest') {
+      const sortColumn = await this.detectSortColumn(tableName)
+      if (sortColumn) {
+        sql += ` ORDER BY \`${sortColumn}\` DESC`
+      }
+    }
+    
     if (limit && limit > 0) {
       sql += ` LIMIT ${limit}`
     }

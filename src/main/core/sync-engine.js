@@ -269,7 +269,7 @@ class SyncTask {
       this.emitProgress()
     }
 
-    const stream = this.remoteDriver.streamTable(tableName, table.limit)
+    const stream = await this.remoteDriver.streamTable(tableName, table.limit, table.order)
     this.activeStream = stream
     
     try {
