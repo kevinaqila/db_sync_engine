@@ -166,7 +166,7 @@ const formatTime = (ts) => {
         <h2 class="text-2xl font-bold text-gray-900 mb-2">Configure Sync Strategy</h2>
         <p class="text-gray-500 mb-8 text-center max-w-md">Choose how you want to synchronize the data to your local machine.</p>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-2xl mb-8">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 w-full max-w-4xl mb-8">
           <!-- Truncate Option -->
           <div 
             @click="syncStrategy = 'full'"
@@ -174,11 +174,26 @@ const formatTime = (ts) => {
             :class="syncStrategy === 'full' ? 'border-blue-500 bg-blue-50/50' : 'border-gray-200 hover:border-blue-300 bg-white'"
           >
             <div class="flex items-center justify-between mb-2">
-              <h3 class="font-bold text-gray-900">Truncate All (Default)</h3>
+              <h3 class="font-bold text-gray-900">Truncate All</h3>
               <CheckCircle v-if="syncStrategy === 'full'" class="w-5 h-5 text-blue-500" />
             </div>
             <p class="text-sm text-gray-600 leading-relaxed">
-              Clears the local table completely and copies all data from the remote server from scratch. Safe but slower for massive tables.
+              Clears local table completely. Copies all data from scratch. Best for master data.
+            </p>
+          </div>
+
+          <!-- Update & Append Option -->
+          <div 
+            @click="syncStrategy = 'update_append'"
+            class="border-2 rounded-xl p-5 cursor-pointer transition-all duration-200"
+            :class="syncStrategy === 'update_append' ? 'border-blue-500 bg-blue-50/50' : 'border-gray-200 hover:border-blue-300 bg-white'"
+          >
+            <div class="flex items-center justify-between mb-2">
+              <h3 class="font-bold text-gray-900">Update & Append</h3>
+              <CheckCircle v-if="syncStrategy === 'update_append'" class="w-5 h-5 text-blue-500" />
+            </div>
+            <p class="text-sm text-gray-600 leading-relaxed">
+              Detects changes by 'updated_at'. Inserts new rows and updates existing ones. Fast and safe.
             </p>
           </div>
 
@@ -189,11 +204,11 @@ const formatTime = (ts) => {
             :class="syncStrategy === 'incremental' ? 'border-blue-500 bg-blue-50/50' : 'border-gray-200 hover:border-blue-300 bg-white'"
           >
             <div class="flex items-center justify-between mb-2">
-              <h3 class="font-bold text-gray-900">Append Newest (Delta)</h3>
+              <h3 class="font-bold text-gray-900">Append Newest</h3>
               <CheckCircle v-if="syncStrategy === 'incremental'" class="w-5 h-5 text-blue-500" />
             </div>
             <p class="text-sm text-gray-600 leading-relaxed">
-              Detects the latest record locally and only fetches newer data from the server. Extremely fast for million-row tables.
+              Only fetches new records by 'id'. Ignores old record changes. Fastest for log tables.
             </p>
           </div>
         </div>

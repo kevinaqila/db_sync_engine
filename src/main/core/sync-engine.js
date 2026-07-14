@@ -237,7 +237,7 @@ class SyncTask {
     this.emitLog('info', `[${tableName}] Preparing table...`)
 
     // Determine if we should use incremental logic. If fallback is true, force full sync.
-    const isIncremental = (table.strategy === 'incremental' && !forceFallback)
+    const isIncremental = (table.strategy === 'incremental' || table.strategy === 'update_append') && !forceFallback
     
     let sinceColumn = null
     let sinceValue = null
@@ -247,10 +247,10 @@ class SyncTask {
       // If table missing locally, insertBatch will fail and trigger Auto-Fallback automatically.
       
       if (table.mode === 'full') {
-        sinceColumn = await this.remoteDriver.detectSortColumn(tableName)
+        sinceColumn = await this.remoteDriver.detectSortColumn(tableName, table.strategy)
         if (sinceColumn) {
           sinceValue = await this.localDriver.getMaxValue(tableName, sinceColumn)
-          this.emitLog('info', `[${tableName}] Incremental mode: Max ${sinceColumn} locally is ${sinceValue || 'null'}`)
+          this.emitLog('info', `[${tableName}] Incremental mode (${table.strategy}): Max ${sinceColumn} locally is ${sinceValue || 'null'}`)
         } else {
           this.emitLog('warning', `[${tableName}] Incremental mode requested but no timestamp/id column found. Falling back to full truncate.`)
           await this.localDriver.truncateTable(tableName)

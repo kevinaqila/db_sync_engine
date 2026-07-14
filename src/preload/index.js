@@ -11,6 +11,9 @@ const api = {
 
   // File dialog
   openFile: () => ipcRenderer.invoke('dialog:openFile'),
+  
+  // App info
+  getVersion: () => ipcRenderer.invoke('app:getVersion'),
 
   // Profile management
   profiles: {

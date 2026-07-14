@@ -57,6 +57,9 @@ function createWindow() {
     })
     return result.filePaths[0] || null
   })
+
+  // App version
+  ipcMain.handle('app:getVersion', () => app.getVersion())
 }
 
 app.whenReady().then(() => {

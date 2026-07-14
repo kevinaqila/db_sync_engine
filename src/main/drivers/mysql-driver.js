@@ -103,56 +103,79 @@ export class MySQLDriver {
       }
 
       for (const [tableName, columns] of Object.entries(tablesMap)) {
-        let sortCol = null
         const colNames = columns.map(c => c.Field.toLowerCase())
-        const timeCandidates = ['created_at', 'updated_at', 'created_time', 'updated_time', 'tanggal', 'date']
-        for (const cand of timeCandidates) {
+        
+        // 1. Find update column (prefers updated_at)
+        let updateCol = null
+        const updateCandidates = ['updated_at', 'updated_time']
+        for (const cand of updateCandidates) {
           if (colNames.includes(cand)) {
-            sortCol = columns.find(c => c.Field.toLowerCase() === cand).Field
+            updateCol = columns.find(c => c.Field.toLowerCase() === cand).Field
             break
           }
         }
-        if (!sortCol) {
-          const primaryCol = columns.find(c => c.Key === 'PRI')
-          if (primaryCol) sortCol = primaryCol.Field
+
+        // 2. Find append column (prefers PRI, then id, then created_at)
+        let appendCol = null
+        const primaryCol = columns.find(c => c.Key === 'PRI')
+        if (primaryCol) {
+          appendCol = primaryCol.Field
         }
-        if (!sortCol) {
+        if (!appendCol) {
           const idCol = columns.find(c => c.Field.toLowerCase().endsWith('id'))
-          if (idCol) sortCol = idCol.Field
+          if (idCol) appendCol = idCol.Field
         }
-        if (sortCol) this.sortColumnCache[tableName] = sortCol
+        if (!appendCol) {
+          const timeCandidates = ['created_at', 'created_time', 'tanggal', 'date']
+          for (const cand of timeCandidates) {
+            if (colNames.includes(cand)) {
+              appendCol = columns.find(c => c.Field.toLowerCase() === cand).Field
+              break
+            }
+          }
+        }
+
+        // 3. Fallbacks
+        if (!updateCol) updateCol = appendCol
+        if (!appendCol) appendCol = updateCol
+
+        this.sortColumnCache[tableName] = {
+          incremental: appendCol,
+          update_append: updateCol
+        }
       }
     } catch (e) {
       console.error('MySQL prefetch failed:', e)
     }
   }
 
-  async detectSortColumn(tableName) {
+  async detectSortColumn(tableName, strategy = 'incremental') {
     if (this.sortColumnCache && this.sortColumnCache[tableName]) {
-      return this.sortColumnCache[tableName]
+      return this.sortColumnCache[tableName][strategy] || this.sortColumnCache[tableName].incremental
     }
     
     try {
       const [columns] = await this.conn.query(`SHOW COLUMNS FROM \`${tableName}\``)
       const colNames = columns.map(c => c.Field.toLowerCase())
       
-      const timeCandidates = ['created_at', 'updated_at', 'created_time', 'updated_time', 'tanggal', 'date']
-      for (const cand of timeCandidates) {
-        const found = colNames.find(c => c === cand)
-        if (found) {
-          const originalCol = columns.find(c => c.Field.toLowerCase() === cand)
-          return originalCol.Field
+      if (strategy === 'update_append') {
+        const updateCandidates = ['updated_at', 'updated_time']
+        for (const cand of updateCandidates) {
+          const found = colNames.find(c => c === cand)
+          if (found) return columns.find(c => c.Field.toLowerCase() === cand).Field
         }
       }
       
       const primaryCol = columns.find(c => c.Key === 'PRI')
-      if (primaryCol) {
-        return primaryCol.Field
-      }
+      if (primaryCol) return primaryCol.Field
       
       const idCol = columns.find(c => c.Field.toLowerCase().endsWith('id'))
-      if (idCol) {
-        return idCol.Field
+      if (idCol) return idCol.Field
+      
+      const timeCandidates = ['created_at', 'created_time', 'tanggal', 'date']
+      for (const cand of timeCandidates) {
+        const found = colNames.find(c => c === cand)
+        if (found) return columns.find(c => c.Field.toLowerCase() === cand).Field
       }
     } catch (e) {
       // Fallback silently if SHOW COLUMNS fails
@@ -201,7 +224,10 @@ export class MySQLDriver {
     // Create placeholders for all rows: (?, ?, ?), (?, ?, ?)
     const allPlaceholders = rows.map(() => rowPlaceholders).join(', ')
 
-    const sql = `REPLACE INTO \`${tableName}\` (${columnsSql}) VALUES ${allPlaceholders}`
+    // Create ON DUPLICATE KEY UPDATE clause
+    const updateClause = columns.map(c => `\`${c}\` = VALUES(\`${c}\`)`).join(', ')
+
+    const sql = `INSERT INTO \`${tableName}\` (${columnsSql}) VALUES ${allPlaceholders} ON DUPLICATE KEY UPDATE ${updateClause}`
     
     // Flatten values
     const values = []

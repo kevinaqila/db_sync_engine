@@ -1,8 +1,16 @@
 <script setup>
+import { ref, onMounted } from 'vue'
 import { useAppStore } from '../../stores/appStore'
 import { Plus, Database, History, Edit, Trash2 } from '@lucide/vue'
 
 const store = useAppStore()
+const appVersion = ref('1.0.0')
+
+onMounted(async () => {
+  if (window.api && window.api.getVersion) {
+    appVersion.value = await window.api.getVersion()
+  }
+})
 
 const selectProfile = (id) => {
   store.setActiveProfile(id)
@@ -87,16 +95,19 @@ const editProfile = (profile, event) => {
       </div>
     </div>
 
-    <!-- History Footer Link -->
+    <!-- History Footer Link & Version -->
     <div class="p-3">
       <button
         @click="store.currentView = 'history'"
-        class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors"
+        class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors mb-2"
         :class="store.currentView === 'history' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'"
       >
         <History class="w-4 h-4" />
         <span>Sync History</span>
       </button>
+      <div class="text-center text-[10px] text-slate-600">
+        v{{ appVersion }}
+      </div>
     </div>
   </aside>
 </template>

@@ -82,28 +82,30 @@ export class SQLiteDriver {
     this.db.prepare(`DELETE FROM "${tableName}"`).run()
   }
 
-  detectSortColumn(tableName) {
+  detectSortColumn(tableName, strategy = 'incremental') {
     try {
       const info = this.db.pragma(`table_info("${tableName}")`)
       const columns = info.map(c => c.name)
       const colNames = columns.map(c => c.toLowerCase())
       
-      const timeCandidates = ['created_at', 'updated_at', 'created_time', 'updated_time', 'tanggal', 'date']
-      for (const cand of timeCandidates) {
-        const found = colNames.find(c => c === cand)
-        if (found) {
-          return columns[colNames.indexOf(cand)]
+      if (strategy === 'update_append') {
+        const updateCandidates = ['updated_at', 'updated_time']
+        for (const cand of updateCandidates) {
+          const found = colNames.find(c => c === cand)
+          if (found) return columns[colNames.indexOf(cand)]
         }
       }
       
       const pkCol = info.find(c => c.pk > 0)
-      if (pkCol) {
-        return pkCol.name
-      }
+      if (pkCol) return pkCol.name
       
       const idCol = columns.find(c => c.toLowerCase().endsWith('id'))
-      if (idCol) {
-        return idCol
+      if (idCol) return idCol
+      
+      const timeCandidates = ['created_at', 'created_time', 'tanggal', 'date']
+      for (const cand of timeCandidates) {
+        const found = colNames.find(c => c === cand)
+        if (found) return columns[colNames.indexOf(cand)]
       }
     } catch (e) {
       // Fallback silently

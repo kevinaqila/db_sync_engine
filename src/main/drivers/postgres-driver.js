@@ -112,36 +112,54 @@ export class PostgreSQLDriver {
       }
 
       for (const [tableName, columns] of Object.entries(tablesMap)) {
-        let sortCol = null
         const colNames = columns.map(c => c.toLowerCase())
-        const timeCandidates = ['created_at', 'updated_at', 'created_time', 'updated_time', 'tanggal', 'date']
         
-        for (const cand of timeCandidates) {
+        // 1. Find update column
+        let updateCol = null
+        const updateCandidates = ['updated_at', 'updated_time']
+        for (const cand of updateCandidates) {
           if (colNames.includes(cand)) {
-            sortCol = columns[colNames.indexOf(cand)]
+            updateCol = columns[colNames.indexOf(cand)]
             break
           }
         }
         
-        if (!sortCol && pkMap[tableName]) {
-          sortCol = pkMap[tableName]
+        // 2. Find append column
+        let appendCol = null
+        if (pkMap[tableName]) {
+          appendCol = pkMap[tableName]
         }
-        
-        if (!sortCol) {
+        if (!appendCol) {
           const idCol = columns.find(c => c.toLowerCase().endsWith('id'))
-          if (idCol) sortCol = idCol
+          if (idCol) appendCol = idCol
+        }
+        if (!appendCol) {
+          const timeCandidates = ['created_at', 'created_time', 'tanggal', 'date']
+          for (const cand of timeCandidates) {
+            if (colNames.includes(cand)) {
+              appendCol = columns[colNames.indexOf(cand)]
+              break
+            }
+          }
         }
         
-        if (sortCol) this.sortColumnCache[tableName] = sortCol
+        // 3. Fallbacks
+        if (!updateCol) updateCol = appendCol
+        if (!appendCol) appendCol = updateCol
+        
+        this.sortColumnCache[tableName] = {
+          incremental: appendCol,
+          update_append: updateCol
+        }
       }
     } catch (e) {
       console.error('Postgres prefetch failed:', e)
     }
   }
 
-  async detectSortColumn(tableName) {
+  async detectSortColumn(tableName, strategy = 'incremental') {
     if (this.sortColumnCache && this.sortColumnCache[tableName]) {
-      return this.sortColumnCache[tableName]
+      return this.sortColumnCache[tableName][strategy] || this.sortColumnCache[tableName].incremental
     }
     
     try {
@@ -154,11 +172,11 @@ export class PostgreSQLDriver {
       const columns = res.rows.map(r => r.column_name)
       const colNames = columns.map(c => c.toLowerCase())
       
-      const timeCandidates = ['created_at', 'updated_at', 'created_time', 'updated_time', 'tanggal', 'date']
-      for (const cand of timeCandidates) {
-        const found = colNames.find(c => c === cand)
-        if (found) {
-          return columns[colNames.indexOf(cand)]
+      if (strategy === 'update_append') {
+        const updateCandidates = ['updated_at', 'updated_time']
+        for (const cand of updateCandidates) {
+          const found = colNames.find(c => c === cand)
+          if (found) return columns[colNames.indexOf(cand)]
         }
       }
       
@@ -171,13 +189,15 @@ export class PostgreSQLDriver {
         AND    i.indisprimary;
       `, [tableName]).catch(() => ({ rows: [] }))
       
-      if (pkRes.rows && pkRes.rows.length > 0) {
-        return pkRes.rows[0].attname
-      }
+      if (pkRes.rows && pkRes.rows.length > 0) return pkRes.rows[0].attname
       
       const idCol = columns.find(c => c.toLowerCase().endsWith('id'))
-      if (idCol) {
-        return idCol
+      if (idCol) return idCol
+      
+      const timeCandidates = ['created_at', 'created_time', 'tanggal', 'date']
+      for (const cand of timeCandidates) {
+        const found = colNames.find(c => c === cand)
+        if (found) return columns[colNames.indexOf(cand)]
       }
     } catch (e) {
       // Fallback silently
@@ -230,12 +250,23 @@ export class PostgreSQLDriver {
     
     // Postgres bulk insert format: ($1, $2), ($3, $4)
     let paramIndex = 1
-    const placeholders = rows.map(() => {
+    const allPlaceholders = rows.map(() => {
       const rowParams = columns.map(() => `$${paramIndex++}`)
       return `(${rowParams.join(', ')})`
     }).join(', ')
 
-    const sql = `INSERT INTO "${tableName}" (${columnsSql}) VALUES ${placeholders} ON CONFLICT DO NOTHING`
+    const pkCol = await this.detectSortColumn(tableName, 'incremental')
+    let conflictClause = 'ON CONFLICT DO NOTHING'
+    
+    if (pkCol) {
+      // If we have a PK, we can do UPSERT
+      const updateSet = columns.filter(c => c !== pkCol).map(c => `"${c}" = EXCLUDED."${c}"`).join(', ')
+      if (updateSet) {
+        conflictClause = `ON CONFLICT ("${pkCol}") DO UPDATE SET ${updateSet}`
+      }
+    }
+
+    const sql = `INSERT INTO "${tableName}" (${columnsSql}) VALUES ${allPlaceholders} ${conflictClause}`
     
     const values = []
     for (const row of rows) {
