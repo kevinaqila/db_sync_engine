@@ -231,27 +231,31 @@ class SyncTask {
 
     // Determine if we should use incremental logic. If fallback is true, force full sync.
     const isIncremental = (table.strategy === 'incremental' && !forceFallback)
-
-    // Fetch schema and create table locally if missing
-    const schema = await this.remoteDriver.getTableSchema(tableName)
-    await this.localDriver.syncTableSchema(tableName, schema, !isIncremental)
-    this.emitLog('info', `[${tableName}] Schema synchronized (dropIfExists: ${!isIncremental}).`)
     
     let sinceColumn = null
     let sinceValue = null
 
-    if (isIncremental && table.mode === 'full') {
-      sinceColumn = await this.remoteDriver.detectSortColumn(tableName)
-      if (sinceColumn) {
-        sinceValue = await this.localDriver.getMaxValue(tableName, sinceColumn)
-        this.emitLog('info', `[${tableName}] Incremental mode: Max ${sinceColumn} locally is ${sinceValue || 'null'}`)
-      } else {
-        this.emitLog('warning', `[${tableName}] Incremental mode requested but no timestamp/id column found. Falling back to full truncate.`)
+    if (isIncremental) {
+      // Skip fetching schema over network for incremental. 
+      // If table missing locally, insertBatch will fail and trigger Auto-Fallback automatically.
+      
+      if (table.mode === 'full') {
+        sinceColumn = await this.remoteDriver.detectSortColumn(tableName)
+        if (sinceColumn) {
+          sinceValue = await this.localDriver.getMaxValue(tableName, sinceColumn)
+          this.emitLog('info', `[${tableName}] Incremental mode: Max ${sinceColumn} locally is ${sinceValue || 'null'}`)
+        } else {
+          this.emitLog('warning', `[${tableName}] Incremental mode requested but no timestamp/id column found. Falling back to full truncate.`)
+          await this.localDriver.truncateTable(tableName)
+          this.emitLog('info', `[${tableName}] Local table truncated.`)
+        }
       }
-    }
-
-    // Truncate local table for full sync (or to empty it for structure mode)
-    if (!isIncremental || (isIncremental && !sinceColumn)) {
+    } else {
+      // Full Sync / Truncate All Mode
+      const schema = await this.remoteDriver.getTableSchema(tableName)
+      await this.localDriver.syncTableSchema(tableName, schema, true)
+      this.emitLog('info', `[${tableName}] Schema synchronized (dropIfExists: true).`)
+      
       await this.localDriver.truncateTable(tableName)
       this.emitLog('info', `[${tableName}] Local table truncated.`)
     }
