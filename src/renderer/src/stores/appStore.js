@@ -44,7 +44,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   function openEditProfile(profile) {
-    editingProfile.value = { ...profile }
+    editingProfile.value = JSON.parse(JSON.stringify(profile))
     currentView.value = 'editProfile'
   }
 
