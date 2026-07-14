@@ -234,7 +234,8 @@ class SyncTask {
 
   async processSingleTable(table, forceFallback = false) {
     const tableName = table.name
-    this.emitLog('info', `[${tableName}] Preparing table...`)
+    // Only log once when starting to process the table
+    // this.emitLog('info', `[${tableName}] Preparing table...`)
 
     // Determine if we should use incremental logic. If fallback is true, force full sync.
     const isIncremental = (table.strategy === 'incremental' || table.strategy === 'update_append') && !forceFallback
@@ -250,29 +251,26 @@ class SyncTask {
         sinceColumn = await this.remoteDriver.detectSortColumn(tableName, table.strategy)
         if (sinceColumn) {
           sinceValue = await this.localDriver.getMaxValue(tableName, sinceColumn)
-          this.emitLog('info', `[${tableName}] Incremental mode (${table.strategy}): Max ${sinceColumn} locally is ${sinceValue || 'null'}`)
+          // Silent: this.emitLog('info', `[${tableName}] Incremental mode (${table.strategy}): Max ${sinceColumn} locally is ${sinceValue || 'null'}`)
         } else {
-          this.emitLog('warning', `[${tableName}] Incremental mode requested but no timestamp/id column found. Falling back to full truncate.`)
+          this.emitLog('warning', `[${tableName}] No timestamp/id column found. Falling back to truncate.`)
           await this.localDriver.truncateTable(tableName)
-          this.emitLog('info', `[${tableName}] Local table truncated.`)
         }
       }
     } else {
       // Full Sync / Truncate All Mode
       const schema = await this.remoteDriver.getTableSchema(tableName)
       await this.localDriver.syncTableSchema(tableName, schema, true)
-      this.emitLog('info', `[${tableName}] Schema synchronized (dropIfExists: true).`)
-      
       await this.localDriver.truncateTable(tableName)
-      this.emitLog('info', `[${tableName}] Local table truncated.`)
     }
 
     if (this.isAborted) return
 
     // Stream data if in 'full' mode
     if (table.mode === 'full') {
-      this.emitLog('info', `[${tableName}] Starting data stream...`)
+      const startTime = Date.now()
       const inserted = await this.streamTableData(table, sinceColumn, sinceValue)
+      const duration = ((Date.now() - startTime) / 1000).toFixed(2)
       
       // Self-correct totalRowsToSync (InnoDB information_schema.TABLE_ROWS is an approximation)
       const expected = (table.limit && table.limit > 0 && table.limit < (table.rowCount || 0)) 
@@ -281,9 +279,7 @@ class SyncTask {
       this.stats.totalRowsToSync = this.stats.totalRowsToSync - expected + inserted
       this.forceEmitProgress()
       
-      this.emitLog('success', `[${tableName}] Data sync completed.`)
-    } else {
-      this.emitLog('info', `[${tableName}] Skipped data (structure only).`)
+      this.emitLog('success', `[${tableName}] Synced ${inserted} rows in ${duration}s.`)
     }
   }
 
