@@ -147,7 +147,7 @@ const save = async () => {
     return
   }
 
-  const profileData = {
+  const rawData = {
     ...(props.profile || {}),
     id: id.value,
     name: name.value,
@@ -170,6 +170,8 @@ const save = async () => {
     localDbPassword: localDbPassword.value,
     localDbName: localDbName.value
   }
+  
+  const profileData = JSON.parse(JSON.stringify(rawData))
 
   try {
     const saved = await store.saveProfile(profileData)
