@@ -180,21 +180,38 @@ class SyncTask {
         this.emitProgress()
         this.emitLog('info', `[${tableName}] Preparing table...`)
 
+        const isIncremental = table.strategy === 'incremental'
+
         // Fetch schema and create table locally if missing
         const schema = await this.remoteDriver.getTableSchema(tableName)
-        await this.localDriver.syncTableSchema(tableName, schema)
-        this.emitLog('info', `[${tableName}] Schema synchronized.`)
+        await this.localDriver.syncTableSchema(tableName, schema, !isIncremental)
+        this.emitLog('info', `[${tableName}] Schema synchronized (dropIfExists: ${!isIncremental}).`)
         
+        let sinceColumn = null
+        let sinceValue = null
+
+        if (isIncremental && table.mode === 'full') {
+          sinceColumn = await this.remoteDriver.detectSortColumn(tableName)
+          if (sinceColumn) {
+            sinceValue = await this.localDriver.getMaxValue(tableName, sinceColumn)
+            this.emitLog('info', `[${tableName}] Incremental mode: Max ${sinceColumn} locally is ${sinceValue || 'null'}`)
+          } else {
+            this.emitLog('warning', `[${tableName}] Incremental mode requested but no timestamp/id column found. Falling back to full truncate.`)
+          }
+        }
+
         // Truncate local table for full sync (or to empty it for structure mode)
-        await this.localDriver.truncateTable(tableName)
-        this.emitLog('info', `[${tableName}] Local table truncated.`)
+        if (!isIncremental || (isIncremental && !sinceColumn)) {
+          await this.localDriver.truncateTable(tableName)
+          this.emitLog('info', `[${tableName}] Local table truncated.`)
+        }
 
         if (this.isAborted) break
 
         // Stream data if in 'full' mode
         if (table.mode === 'full') {
           this.emitLog('info', `[${tableName}] Starting data stream...`)
-          const inserted = await this.streamTableData(table)
+          const inserted = await this.streamTableData(table, sinceColumn, sinceValue)
           
           // Self-correct totalRowsToSync (InnoDB information_schema.TABLE_ROWS is an approximation)
           const expected = (table.limit && table.limit > 0 && table.limit < (table.rowCount || 0)) 
@@ -239,7 +256,7 @@ class SyncTask {
     }
   }
 
-  async streamTableData(table) {
+  async streamTableData(table, sinceColumn = null, sinceValue = null) {
     const tableName = table.name
     let batch = []
     let tableInsertedRows = 0
@@ -269,7 +286,7 @@ class SyncTask {
       this.emitProgress()
     }
 
-    const stream = await this.remoteDriver.streamTable(tableName, table.limit, table.order)
+    const stream = await this.remoteDriver.streamTable(tableName, table.limit, table.order, sinceColumn, sinceValue)
     this.activeStream = stream
     
     try {

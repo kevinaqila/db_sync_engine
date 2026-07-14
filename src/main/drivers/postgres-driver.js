@@ -61,9 +61,21 @@ export class PostgreSQLDriver {
     return `CREATE TABLE IF NOT EXISTS "${tableName}" (\n  ${cols.join(',\n  ')}\n);`
   }
 
-  async syncTableSchema(tableName, createTableSql) {
-    await this.client.query(`DROP TABLE IF EXISTS "${tableName}" CASCADE`)
+  async syncTableSchema(tableName, createTableSql, dropIfExists = true) {
+    if (dropIfExists) {
+      await this.client.query(`DROP TABLE IF EXISTS "${tableName}" CASCADE`)
+    }
     await this.client.query(createTableSql)
+  }
+
+  async getMaxValue(tableName, columnName) {
+    try {
+      const sql = `SELECT MAX("${columnName}") as max_val FROM "${tableName}"`
+      const res = await this.client.query(sql)
+      return res.rows[0].max_val
+    } catch(e) {
+      return null
+    }
   }
 
   async truncateTable(tableName) {
@@ -112,25 +124,34 @@ export class PostgreSQLDriver {
     return null
   }
 
-  async *streamTable(tableName, limit, order = 'oldest') {
+  async *streamTable(tableName, limit, order = 'oldest', sinceColumn = null, sinceValue = null) {
     let offset = 0
     const chunkLimit = 1000
     let totalFetched = 0
     
+    let whereSql = ''
+    const params = []
+    if (sinceColumn && sinceValue !== undefined && sinceValue !== null) {
+      whereSql = `WHERE "${sinceColumn}" > $1`
+      params.push(sinceValue)
+    }
+
     let orderSql = ''
     if (limit && limit > 0 && order === 'newest') {
       const sortColumn = await this.detectSortColumn(tableName)
       if (sortColumn) {
         orderSql = `ORDER BY "${sortColumn}" DESC`
       }
+    } else if (sinceColumn) {
+      orderSql = `ORDER BY "${sinceColumn}" ASC`
     }
 
     while (true) {
       const fetchLimit = (limit > 0 && limit - totalFetched < chunkLimit) ? limit - totalFetched : chunkLimit
       if (limit > 0 && totalFetched >= limit) break
 
-      const sql = `SELECT * FROM "${tableName}" ${orderSql} LIMIT ${fetchLimit} OFFSET ${offset}`
-      const res = await this.client.query(sql)
+      const sql = `SELECT * FROM "${tableName}" ${whereSql} ${orderSql} LIMIT ${fetchLimit} OFFSET ${offset}`
+      const res = await this.client.query(sql, params)
       for (const row of res.rows) {
         yield row
         totalFetched++
@@ -153,7 +174,7 @@ export class PostgreSQLDriver {
       return `(${rowParams.join(', ')})`
     }).join(', ')
 
-    const sql = `INSERT INTO "${tableName}" (${columnsSql}) VALUES ${placeholders}`
+    const sql = `INSERT INTO "${tableName}" (${columnsSql}) VALUES ${placeholders} ON CONFLICT DO NOTHING`
     
     const values = []
     for (const row of rows) {

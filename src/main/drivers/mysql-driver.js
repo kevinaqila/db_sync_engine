@@ -57,11 +57,30 @@ export class MySQLDriver {
     return sql
   }
 
-  async syncTableSchema(tableName, createTableSql) {
-    // Drop table if exists to ensure schema is exactly matched with remote,
-    // avoiding "Unknown column" errors if remote schema was updated.
-    await this.conn.query(`DROP TABLE IF EXISTS \`${tableName}\``)
-    await this.conn.query(createTableSql)
+  async syncTableSchema(tableName, createTableSql, dropIfExists = true) {
+    if (dropIfExists) {
+      await this.conn.query(`DROP TABLE IF EXISTS \`${tableName}\``)
+    }
+    
+    // Ensure CREATE TABLE is safe if not dropping
+    let safeSql = createTableSql
+    if (!dropIfExists && safeSql.toUpperCase().startsWith('CREATE TABLE `')) {
+      safeSql = safeSql.replace(/^CREATE TABLE `/i, 'CREATE TABLE IF NOT EXISTS `')
+    } else if (!dropIfExists && safeSql.toUpperCase().startsWith('CREATE TABLE ')) {
+      safeSql = safeSql.replace(/^CREATE TABLE /i, 'CREATE TABLE IF NOT EXISTS ')
+    }
+    
+    await this.conn.query(safeSql)
+  }
+
+  async getMaxValue(tableName, columnName) {
+    try {
+      const sql = `SELECT MAX(\`${columnName}\`) as max_val FROM \`${tableName}\``
+      const [rows] = await this.conn.query(sql)
+      return rows[0].max_val
+    } catch(e) {
+      return null
+    }
   }
 
   async truncateTable(tableName) {
@@ -97,22 +116,31 @@ export class MySQLDriver {
     return null
   }
 
-  async streamTable(tableName, limit, order = 'oldest') {
-    // Must use the callback API from underlying connection for streaming
+  async streamTable(tableName, limit, order = 'oldest', sinceColumn = null, sinceValue = null) {
     const rawConn = this.conn.connection
     let sql = `SELECT * FROM \`${tableName}\``
+    const params = []
+    
+    if (sinceColumn && sinceValue !== undefined && sinceValue !== null) {
+      sql += ` WHERE \`${sinceColumn}\` > ?`
+      params.push(sinceValue)
+    }
     
     if (limit && limit > 0 && order === 'newest') {
       const sortColumn = await this.detectSortColumn(tableName)
       if (sortColumn) {
         sql += ` ORDER BY \`${sortColumn}\` DESC`
       }
+    } else if (sinceColumn) {
+      // Always order ASC by sort column when doing incremental append
+      sql += ` ORDER BY \`${sinceColumn}\` ASC`
     }
     
     if (limit && limit > 0) {
       sql += ` LIMIT ${limit}`
     }
-    const query = rawConn.query(sql)
+    
+    const query = rawConn.query(sql, params)
     return query.stream()
   }
 

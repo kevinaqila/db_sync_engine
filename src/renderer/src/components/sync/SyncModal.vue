@@ -20,6 +20,8 @@ const logUnsubscribe = ref(null)
 const logs = ref([])
 const logContainer = ref(null)
 const elapsedSeconds = ref(0)
+const isConfiguring = ref(true)
+const syncStrategy = ref('full')
 let animationFrameId = null
 
 const startTimer = () => {
@@ -47,7 +49,8 @@ const stopTimer = () => {
 
 watch(() => props.show, async (newVal) => {
   if (newVal) {
-    startSync()
+    isConfiguring.value = true
+    syncStrategy.value = 'full'
   } else {
     reset()
   }
@@ -71,8 +74,14 @@ const startSync = async () => {
 
   startTimer()
 
+  startTimer()
+
   const profileRaw = JSON.parse(JSON.stringify(props.profile))
-  const tablesRaw = JSON.parse(JSON.stringify(props.tables))
+  const tablesRaw = JSON.parse(JSON.stringify(props.tables)).map(t => {
+    t.strategy = syncStrategy.value
+    return t
+  })
+  
   syncId.value = await window.api.sync.start(profileRaw, tablesRaw)
   
   unsubscribe.value = window.api.sync.onProgress(syncId.value, (newStats) => {
@@ -149,6 +158,58 @@ const formatTime = (ts) => {
   <div v-if="show" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/50 backdrop-blur-sm">
     <div class="bg-white rounded shadow-xl w-full max-w-4xl p-6 border border-gray-200 flex flex-col max-h-[90vh]">
       
+      <!-- Pre-Sync Config Screen -->
+      <div v-if="isConfiguring" class="flex flex-col items-center justify-center py-12">
+        <div class="bg-blue-50 p-4 rounded-full mb-6 text-blue-600">
+          <RefreshCw class="w-12 h-12" />
+        </div>
+        <h2 class="text-2xl font-bold text-gray-900 mb-2">Configure Sync Strategy</h2>
+        <p class="text-gray-500 mb-8 text-center max-w-md">Choose how you want to synchronize the data to your local machine.</p>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-2xl mb-8">
+          <!-- Truncate Option -->
+          <div 
+            @click="syncStrategy = 'full'"
+            class="border-2 rounded-xl p-5 cursor-pointer transition-all duration-200"
+            :class="syncStrategy === 'full' ? 'border-blue-500 bg-blue-50/50' : 'border-gray-200 hover:border-blue-300 bg-white'"
+          >
+            <div class="flex items-center justify-between mb-2">
+              <h3 class="font-bold text-gray-900">Truncate All (Default)</h3>
+              <CheckCircle v-if="syncStrategy === 'full'" class="w-5 h-5 text-blue-500" />
+            </div>
+            <p class="text-sm text-gray-600 leading-relaxed">
+              Clears the local table completely and copies all data from the remote server from scratch. Safe but slower for massive tables.
+            </p>
+          </div>
+
+          <!-- Append Option -->
+          <div 
+            @click="syncStrategy = 'incremental'"
+            class="border-2 rounded-xl p-5 cursor-pointer transition-all duration-200"
+            :class="syncStrategy === 'incremental' ? 'border-blue-500 bg-blue-50/50' : 'border-gray-200 hover:border-blue-300 bg-white'"
+          >
+            <div class="flex items-center justify-between mb-2">
+              <h3 class="font-bold text-gray-900">Append Newest (Delta)</h3>
+              <CheckCircle v-if="syncStrategy === 'incremental'" class="w-5 h-5 text-blue-500" />
+            </div>
+            <p class="text-sm text-gray-600 leading-relaxed">
+              Detects the latest record locally and only fetches newer data from the server. Extremely fast for million-row tables.
+            </p>
+          </div>
+        </div>
+
+        <div class="flex gap-4">
+          <button @click="emit('close')" class="btn-secondary px-8 py-2.5">
+            Cancel
+          </button>
+          <button @click="isConfiguring = false; startSync()" class="btn-primary px-8 py-2.5 flex items-center gap-2">
+            <DownloadCloud class="w-4 h-4" />
+            Begin Sync
+          </button>
+        </div>
+      </div>
+
+      <template v-else>
       <!-- Header -->
       <div class="flex items-center justify-between mb-6 pb-4 border-b border-gray-200 shrink-0">
         <h2 class="text-lg font-bold text-gray-900 flex items-center gap-2  tracking-wider">
@@ -268,7 +329,7 @@ const formatTime = (ts) => {
           Close Window
         </button>
       </div>
-
+      </template>
     </div>
   </div>
 </template>

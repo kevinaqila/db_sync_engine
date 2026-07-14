@@ -42,11 +42,20 @@ export class SQLiteDriver {
     return row.sql
   }
 
-  async syncTableSchema(tableName, createTableSql) {
-    this.db.exec(`DROP TABLE IF EXISTS "${tableName}"`)
+  async syncTableSchema(tableName, createTableSql, dropIfExists = true) {
+    if (dropIfExists) {
+      this.db.exec(`DROP TABLE IF EXISTS "${tableName}"`)
+    }
+    
+    let safeSql = createTableSql
+    if (!dropIfExists && safeSql.toUpperCase().startsWith('CREATE TABLE "')) {
+      safeSql = safeSql.replace(/^CREATE TABLE "/i, 'CREATE TABLE IF NOT EXISTS "')
+    } else if (!dropIfExists && safeSql.toUpperCase().startsWith('CREATE TABLE ')) {
+      safeSql = safeSql.replace(/^CREATE TABLE /i, 'CREATE TABLE IF NOT EXISTS ')
+    }
     
     // Basic translation of MySQL/Postgres CREATE TABLE syntax to SQLite
-    let sql = createTableSql
+    let sql = safeSql
       .replace(/AUTO_INCREMENT/gi, 'AUTOINCREMENT')
       .replace(/INT\([0-9]+\)/gi, 'INTEGER')
       .replace(/VARCHAR\([0-9]+\)/gi, 'TEXT')
@@ -57,6 +66,16 @@ export class SQLiteDriver {
       .replace(/COLLATE [a-z0-9_]+/gi, '')
       
     this.db.exec(sql)
+  }
+
+  async getMaxValue(tableName, columnName) {
+    try {
+      const sql = `SELECT MAX("${columnName}") as max_val FROM "${tableName}"`
+      const row = this.db.prepare(sql).get()
+      return row ? row.max_val : null
+    } catch(e) {
+      return null
+    }
   }
 
   async truncateTable(tableName) {
@@ -92,21 +111,29 @@ export class SQLiteDriver {
     return null
   }
 
-  async *streamTable(tableName, limit, order = 'oldest') {
+  async *streamTable(tableName, limit, order = 'oldest', sinceColumn = null, sinceValue = null) {
     let sql = `SELECT * FROM "${tableName}"`
+    const params = []
+    
+    if (sinceColumn && sinceValue !== undefined && sinceValue !== null) {
+      sql += ` WHERE "${sinceColumn}" > ?`
+      params.push(sinceValue)
+    }
     
     if (limit && limit > 0 && order === 'newest') {
       const sortColumn = this.detectSortColumn(tableName)
       if (sortColumn) {
         sql += ` ORDER BY "${sortColumn}" DESC`
       }
+    } else if (sinceColumn) {
+      sql += ` ORDER BY "${sinceColumn}" ASC`
     }
 
     if (limit && limit > 0) {
       sql += ` LIMIT ${limit}`
     }
     const stmt = this.db.prepare(sql)
-    for (const row of stmt.iterate()) {
+    for (const row of stmt.iterate(...params)) {
       yield row
     }
   }
