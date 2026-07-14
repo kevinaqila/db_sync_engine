@@ -82,7 +82,68 @@ export class PostgreSQLDriver {
     await this.client.query(`TRUNCATE TABLE "${tableName}" CASCADE`)
   }
 
+  async prefetchMetadata() {
+    this.sortColumnCache = {}
+    try {
+      const colRes = await this.client.query(`
+        SELECT table_name, column_name 
+        FROM information_schema.columns 
+        WHERE table_schema = 'public'
+      `)
+      
+      const pkRes = await this.client.query(`
+        SELECT t.relname as table_name, a.attname as column_name
+        FROM   pg_index i
+        JOIN   pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+        JOIN   pg_class t ON t.oid = i.indrelid
+        JOIN   pg_namespace n ON n.oid = t.relnamespace
+        WHERE  i.indisprimary AND n.nspname = 'public'
+      `)
+      
+      const pkMap = {}
+      for (const r of pkRes.rows) {
+        pkMap[r.table_name] = r.column_name
+      }
+
+      const tablesMap = {}
+      for (const r of colRes.rows) {
+        if (!tablesMap[r.table_name]) tablesMap[r.table_name] = []
+        tablesMap[r.table_name].push(r.column_name)
+      }
+
+      for (const [tableName, columns] of Object.entries(tablesMap)) {
+        let sortCol = null
+        const colNames = columns.map(c => c.toLowerCase())
+        const timeCandidates = ['created_at', 'updated_at', 'created_time', 'updated_time', 'tanggal', 'date']
+        
+        for (const cand of timeCandidates) {
+          if (colNames.includes(cand)) {
+            sortCol = columns[colNames.indexOf(cand)]
+            break
+          }
+        }
+        
+        if (!sortCol && pkMap[tableName]) {
+          sortCol = pkMap[tableName]
+        }
+        
+        if (!sortCol) {
+          const idCol = columns.find(c => c.toLowerCase().endsWith('id'))
+          if (idCol) sortCol = idCol
+        }
+        
+        if (sortCol) this.sortColumnCache[tableName] = sortCol
+      }
+    } catch (e) {
+      console.error('Postgres prefetch failed:', e)
+    }
+  }
+
   async detectSortColumn(tableName) {
+    if (this.sortColumnCache && this.sortColumnCache[tableName]) {
+      return this.sortColumnCache[tableName]
+    }
+    
     try {
       const res = await this.client.query(`
         SELECT column_name 

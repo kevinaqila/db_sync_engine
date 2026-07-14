@@ -87,7 +87,51 @@ export class MySQLDriver {
     await this.conn.query(`TRUNCATE TABLE \`${tableName}\``)
   }
 
+  async prefetchMetadata() {
+    this.sortColumnCache = {}
+    try {
+      const sql = `
+        SELECT TABLE_NAME, COLUMN_NAME, COLUMN_KEY 
+        FROM information_schema.COLUMNS 
+        WHERE TABLE_SCHEMA = DATABASE()
+      `
+      const [rows] = await this.conn.query(sql)
+      const tablesMap = {}
+      for (const r of rows) {
+        if (!tablesMap[r.TABLE_NAME]) tablesMap[r.TABLE_NAME] = []
+        tablesMap[r.TABLE_NAME].push({ Field: r.COLUMN_NAME, Key: r.COLUMN_KEY })
+      }
+
+      for (const [tableName, columns] of Object.entries(tablesMap)) {
+        let sortCol = null
+        const colNames = columns.map(c => c.Field.toLowerCase())
+        const timeCandidates = ['created_at', 'updated_at', 'created_time', 'updated_time', 'tanggal', 'date']
+        for (const cand of timeCandidates) {
+          if (colNames.includes(cand)) {
+            sortCol = columns.find(c => c.Field.toLowerCase() === cand).Field
+            break
+          }
+        }
+        if (!sortCol) {
+          const primaryCol = columns.find(c => c.Key === 'PRI')
+          if (primaryCol) sortCol = primaryCol.Field
+        }
+        if (!sortCol) {
+          const idCol = columns.find(c => c.Field.toLowerCase().endsWith('id'))
+          if (idCol) sortCol = idCol.Field
+        }
+        if (sortCol) this.sortColumnCache[tableName] = sortCol
+      }
+    } catch (e) {
+      console.error('MySQL prefetch failed:', e)
+    }
+  }
+
   async detectSortColumn(tableName) {
+    if (this.sortColumnCache && this.sortColumnCache[tableName]) {
+      return this.sortColumnCache[tableName]
+    }
+    
     try {
       const [columns] = await this.conn.query(`SHOW COLUMNS FROM \`${tableName}\``)
       const colNames = columns.map(c => c.Field.toLowerCase())

@@ -171,7 +171,14 @@ class SyncTask {
       this.stats.status = 'syncing'
       this.emitProgress()
 
-      // 4. Sync Tables
+      // 4. Prefetch Metadata (OPTIMIZATION)
+      if (typeof this.remoteDriver.prefetchMetadata === 'function') {
+        this.emitLog('info', 'Prefetching schema metadata from remote database...')
+        await this.remoteDriver.prefetchMetadata()
+        this.emitLog('success', 'Metadata prefetched successfully.')
+      }
+
+      // 5. Sync Tables
       for (const table of this.tables) {
         if (this.isAborted) break
         
