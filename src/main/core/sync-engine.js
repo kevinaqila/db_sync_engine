@@ -1,5 +1,5 @@
 import { createTunnel } from './ssh-tunnel'
-import { getSyncHistory, addSyncHistory } from './config-store'
+import { getSyncHistory, addSyncHistory, getTableCursor, saveTableCursor } from './config-store'
 import { ipcMain } from 'electron'
 
 const activeSyncTasks = new Map()
@@ -250,7 +250,13 @@ class SyncTask {
       if (table.mode === 'full') {
         sinceColumn = await this.remoteDriver.detectSortColumn(tableName, table.strategy)
         if (sinceColumn) {
-          sinceValue = await this.localDriver.getMaxValue(tableName, sinceColumn)
+          // Check config first for cursor watermark
+          sinceValue = getTableCursor(this.profile.id, tableName)
+          
+          if (sinceValue === null) {
+            // Fallback to local DB if no cursor history exists yet
+            sinceValue = await this.localDriver.getMaxValue(tableName, sinceColumn)
+          }
           // Silent: this.emitLog('info', `[${tableName}] Incremental mode (${table.strategy}): Max ${sinceColumn} locally is ${sinceValue || 'null'}`)
         } else {
           this.emitLog('warning', `[${tableName}] No timestamp/id column found. Falling back to truncate.`)
@@ -287,6 +293,7 @@ class SyncTask {
     const tableName = table.name
     let batch = []
     let tableInsertedRows = 0
+    let highestCursor = sinceValue // Track highest value from remote data
     // Increase batch size to 2000 for massive speed up (Bulk Insert Optimization)
     const BATCH_SIZE = 2000
 
@@ -321,6 +328,14 @@ class SyncTask {
         if (this.isAborted) {
           break
         }
+        
+        // Track the highest cursor value from incoming remote data
+        if (sinceColumn && row[sinceColumn] !== undefined && row[sinceColumn] !== null) {
+          if (highestCursor === null || row[sinceColumn] > highestCursor) {
+            highestCursor = row[sinceColumn]
+          }
+        }
+        
         batch.push(row) // Just push the raw row directly
         if (batch.length >= BATCH_SIZE) {
           await flushBatch()
@@ -332,6 +347,11 @@ class SyncTask {
 
     if (!this.isAborted) {
       await flushBatch()
+      
+      // Save the new cursor to config
+      if (sinceColumn && highestCursor !== null) {
+        saveTableCursor(this.profile.id, tableName, highestCursor)
+      }
     }
     
     return tableInsertedRows

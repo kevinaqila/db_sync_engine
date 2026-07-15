@@ -47,3 +47,16 @@ export function addSyncHistory(entry) {
   // Keep only last 50 entries
   store.set('syncHistory', history.slice(0, 50))
 }
+
+export function getTableCursor(profileId, tableName) {
+  const cursors = store.get('tableCursors', {})
+  const profileCursors = cursors[profileId] || {}
+  return profileCursors[tableName] || null
+}
+
+export function saveTableCursor(profileId, tableName, cursorValue) {
+  const cursors = store.get('tableCursors', {})
+  if (!cursors[profileId]) cursors[profileId] = {}
+  cursors[profileId][tableName] = cursorValue
+  store.set('tableCursors', cursors)
+}
