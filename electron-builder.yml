@@ -1,5 +1,6 @@
 appId: com.electron.app
 productName: db-sync
+compression: maximum
 directories:
   buildResources: build
 files:
