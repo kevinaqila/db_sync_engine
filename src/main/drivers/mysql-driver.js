@@ -83,6 +83,15 @@ export class MySQLDriver {
     }
   }
 
+  async getRowCount(tableName) {
+    try {
+      const [rows] = await this.conn.query(`SELECT COUNT(*) as c FROM \`${tableName}\``)
+      return rows[0].c
+    } catch(e) {
+      return 0
+    }
+  }
+
   async truncateTable(tableName) {
     await this.conn.query(`TRUNCATE TABLE \`${tableName}\``)
   }

@@ -78,6 +78,15 @@ export class PostgreSQLDriver {
     }
   }
 
+  async getRowCount(tableName) {
+    try {
+      const res = await this.client.query(`SELECT COUNT(*) as c FROM "${tableName}"`)
+      return Number(res.rows[0].c)
+    } catch(e) {
+      return 0
+    }
+  }
+
   async truncateTable(tableName) {
     await this.client.query(`TRUNCATE TABLE "${tableName}" CASCADE`)
   }

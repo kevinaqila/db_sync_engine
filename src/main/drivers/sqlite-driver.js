@@ -78,6 +78,15 @@ export class SQLiteDriver {
     }
   }
 
+  async getRowCount(tableName) {
+    try {
+      const row = this.db.prepare(`SELECT COUNT(*) as c FROM "${tableName}"`).get()
+      return row ? row.c : 0
+    } catch(e) {
+      return 0
+    }
+  }
+
   async truncateTable(tableName) {
     this.db.prepare(`DELETE FROM "${tableName}"`).run()
   }

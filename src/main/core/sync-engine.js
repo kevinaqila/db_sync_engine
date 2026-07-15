@@ -257,6 +257,19 @@ class SyncTask {
             // Fallback to local DB if no cursor history exists yet
             sinceValue = await this.localDriver.getMaxValue(tableName, sinceColumn)
           }
+
+          // If the user specifies a limit, and our local row count is significantly less than that limit,
+          // we should ignore sinceValue so it can backfill up to the new limit.
+          // This fixes the issue where increasing the limit during appendnew/update_append 
+          // results in no new rows being fetched.
+          if (table.limit && table.limit > 0) {
+            const localCount = await this.localDriver.getRowCount(tableName)
+            if (localCount < table.limit) {
+              sinceValue = null
+              this.emitLog('info', `[${tableName}] Local rows (${localCount}) < Limit (${table.limit}). Backfilling...`)
+            }
+          }
+          
           // Silent: this.emitLog('info', `[${tableName}] Incremental mode (${table.strategy}): Max ${sinceColumn} locally is ${sinceValue || 'null'}`)
         } else {
           this.emitLog('warning', `[${tableName}] No timestamp/id column found. Falling back to truncate.`)
